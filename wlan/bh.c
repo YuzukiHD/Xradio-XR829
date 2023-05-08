@@ -56,13 +56,13 @@ enum xradio_bh_pm_state {
 typedef int (*xradio_wsm_handler) (struct xradio_common *hw_priv, u8 *data,
 				   size_t size);
 
-static inline u32 bh_time_interval(struct timeval *oldtime)
+static inline u32 bh_time_interval(struct timespec64 *oldtime)
 {
 	u32 time_int;
-	struct timeval newtime;
+	struct timespec64 newtime;
 	xr_do_gettimeofday(&newtime);
 	time_int = (newtime.tv_sec - oldtime->tv_sec) * 1000000 + \
-			   (long)(newtime.tv_usec - oldtime->tv_usec);
+			   (long)(newtime.tv_nsec - oldtime->tv_nsec) / 1000;
 	return time_int;
 }
 
@@ -266,7 +266,7 @@ void xradio_proc_wakeup(struct xradio_common *hw_priv)
 }
 
 #if PERF_INFO_TEST
-struct timeval proc_start_time;
+struct timespec64 proc_start_time;
 #endif
 
 #if BH_PROC_DPA
@@ -662,7 +662,7 @@ static inline int xradio_bh_get(struct xradio_common *hw_priv, u8 **data,
 #endif
 
 #if PERF_INFO_TEST
-struct timeval bh_put_time;
+struct timespec64 bh_put_time;
 #endif
 
 static inline int xradio_bh_put(struct xradio_common *hw_priv,
@@ -1151,7 +1151,7 @@ static inline int xradio_device_sleep(struct xradio_common *hw_priv)
 	return ret;
 }
 
-struct timeval wakeup_time;
+struct timespec64 wakeup_time;
 static int xradio_device_wakeup(struct xradio_common *hw_priv, u16 *ctrl_reg_ptr)
 {
 	int ret = 0;
@@ -1196,6 +1196,7 @@ static int xradio_device_wakeup(struct xradio_common *hw_priv, u16 *ctrl_reg_ptr
 	} else {
 		bh_printk(XRADIO_DBG_ERROR, "Device cannot wakeup in %dms.\n",
 				DEV_WAKEUP_MAX_TIME*1000/HZ);
+		hw_priv->hw_cant_wakeup = true;
 		return -1;
 	}
 }
@@ -1232,13 +1233,13 @@ void xradio_enable_powersave(struct xradio_vif *priv, bool enable)
 }
 
 #if PERF_INFO_TEST
-struct timeval tx_start_time1;
-struct timeval tx_start_time2;
-struct timeval rx_start_time1;
-struct timeval rx_start_time2;
-struct timeval bh_start_time;
-struct timeval sdio_reg_time;
-extern struct timeval last_showtime;
+struct timespec64 tx_start_time1;
+struct timespec64 tx_start_time2;
+struct timespec64 rx_start_time1;
+struct timespec64 rx_start_time2;
+struct timespec64 bh_start_time;
+struct timespec64 sdio_reg_time;
+extern struct timespec64 last_showtime;
 #endif
 
 u32  sdio_reg_cnt1;
@@ -1266,7 +1267,7 @@ static int xradio_bh(void *arg)
 	int rx = 0, tx = 0, term, suspend;
 	struct wsm_hdr *wsm;
 	size_t wsm_len;
-	int wsm_id;
+	u16 wsm_id;
 	u8 wsm_seq;
 	int rx_resync = 1;
 	u16 ctrl_reg = 0;
@@ -1553,7 +1554,7 @@ data_proc:
 			PERF_INFO_STAMP(&bh_start_time, &bh_others, 0);
 
 			/* read_len=ctrl_reg*2.*/
-			read_len = (ctrl_reg & HIF_CTRL_NEXT_LEN_MASK)<<1;
+			read_len = (size_t)((ctrl_reg & HIF_CTRL_NEXT_LEN_MASK)<<1);
 			if (!read_len) {
 				++sdio_reg_cnt6;
 				rx = 0;
@@ -1623,11 +1624,11 @@ rx:
 			PERF_INFO_STAMP_UPDATE(&rx_start_time2, &sdio_read, alloc_len);
 
 			/* Piggyback */
-			ctrl_reg = __le16_to_cpu(((__le16 *)data)[(alloc_len >> 1) - 1]);
+			ctrl_reg = (u16)(__le16_to_cpu(((__le16 *)data)[(alloc_len >> 1) - 1]));
 
 			/* check wsm length. */
 			wsm = (struct wsm_hdr *)data;
-			wsm_len = __le32_to_cpu(wsm->len);
+			wsm_len = (size_t)(__le32_to_cpu(wsm->len));
 			if (SYS_WARN(wsm_len > read_len)) {
 				bh_printk(XRADIO_DBG_ERROR, "wsm_id=0x%04x, wsm_len=%zu.\n",
 						(__le32_to_cpu(wsm->id) & 0xFFF), wsm_len);
@@ -1652,8 +1653,8 @@ rx:
 #endif /* CONFIG_XRADIO_DEBUG */
 
 			/* extract wsm id and seq. */
-			wsm_id = __le32_to_cpu(wsm->id) & 0xFFF;
-			wsm_seq = (__le32_to_cpu(wsm->id) >> 13) & 7;
+			wsm_id = (u16)(__le32_to_cpu(wsm->id) & 0x0FFF);
+			wsm_seq = (u8)((__le32_to_cpu(wsm->id) >> 13) & 0x07);
 			/* for multi-rx indication, there two case.*/
 			if (ROUND4(wsm_len) < read_len - 2)
 				skb_trim(skb_rx, read_len - 2);
@@ -1669,7 +1670,8 @@ rx:
 				break;
 			} else if (likely(!rx_resync)) {
 				if (SYS_WARN(wsm_seq != hw_priv->wsm_rx_seq)) {
-					bh_printk(XRADIO_DBG_ERROR, "wsm_seq=%d.\n", wsm_seq);
+					bh_printk(XRADIO_DBG_ERROR, "wsm_seq=%d, wsm_rx_seq = %d.\n",
+						wsm_seq, hw_priv->wsm_rx_seq);
 					hw_priv->bh_error = __LINE__;
 					break;
 				}
@@ -1685,7 +1687,7 @@ rx:
 				int rc = 0;
 				int if_id = 0;
 				u32 *cfm = (u32 *)(wsm + 1);
-				wsm_id &= ~WSM_TX_LINK_ID(WSM_TX_LINK_ID_MAX);
+				wsm_id &= (u16)(~WSM_TX_LINK_ID(WSM_TX_LINK_ID_MAX));
 				if (wsm_id == 0x041E) {
 					int cfm_cnt = *cfm;
 					struct wsm_tx_confirm *tx_cfm =
@@ -1694,7 +1696,7 @@ rx:
 
 					rc = wsm_release_tx_buffer(hw_priv, cfm_cnt);
 					do {
-						if_id = xradio_queue_get_if_id(tx_cfm->packetID);
+						if_id = (int)(xradio_queue_get_if_id(tx_cfm->packetID));
 						wsm_release_vif_tx_buffer(hw_priv, if_id, 1);
 						tx_cfm = (struct wsm_tx_confirm *)((u8 *)tx_cfm +
 							offsetof(struct wsm_tx_confirm, link_id));
@@ -1702,7 +1704,7 @@ rx:
 				} else {
 					rc = wsm_release_tx_buffer(hw_priv, 1);
 					if (wsm_id == 0x0404) {
-						if_id = xradio_queue_get_if_id(*cfm);
+						if_id = (int)(xradio_queue_get_if_id(*cfm));
 						wsm_release_vif_tx_buffer(hw_priv, if_id, 1);
 					} else {
 #if BH_PROC_RX

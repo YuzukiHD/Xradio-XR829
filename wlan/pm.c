@@ -152,14 +152,14 @@ static struct platform_driver xradio_power_driver = {
 };
 
 #ifdef CONFIG_XRADIO_DEBUG
-struct timeval suspend_time;
-struct timeval resume_time;
-u32 xradio_realtime_interval(struct timeval *oldtime, struct timeval *newtime)
+struct timespec64 suspend_time;
+struct timespec64 resume_time;
+u32 xradio_realtime_interval(struct timespec64 *oldtime, struct timespec64 *newtime)
 {
 	u32 time_int;
 	xr_do_gettimeofday(newtime);
 	time_int = (newtime->tv_sec - oldtime->tv_sec) * 1000 + \
-			    (newtime->tv_usec - oldtime->tv_usec) / 1000;
+			    (newtime->tv_nsec - oldtime->tv_nsec) / 1000000;
 	return time_int;
 }
 #endif

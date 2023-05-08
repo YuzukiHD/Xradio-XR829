@@ -270,8 +270,21 @@ int xradio_queue_clear(struct xradio_queue *queue, int if_id)
 
 	cnt = 0;
 	spin_lock_bh(&queue->lock);
+
+#ifdef QUEUE_GEN_IF_TABLE
+	if (XRWL_ALL_IFS == if_id) {
+		for (i = 0; i < XRWL_ALL_IFS; i++) {
+			queue->generation[i]++;
+			queue->generation[i] &= 0xf;
+		}
+	} else {
+		queue->generation[if_id]++;
+		queue->generation[if_id] &= 0xf;
+	}
+#else
 	queue->generation++;
 	queue->generation &= 0xf;
+#endif
 	//list_splice_tail_init(&queue->queue, &queue->pending);
 	list_for_each_entry_safe(item, tmp, &queue->queue, head) {
 		SYS_WARN(!item->skb);
@@ -396,7 +409,7 @@ int xradio_queue_put(struct xradio_queue *queue, struct sk_buff *skb,
 {
 	int ret = 0;
 #ifdef CONFIG_XRADIO_TESTMODE
-	struct timeval tmval;
+	struct timespec64 tmval;
 #endif /*CONFIG_XRADIO_TESTMODE*/
 	LIST_HEAD(gc_list);
 	struct xradio_queue_stats *stats = queue->stats;
@@ -417,7 +430,12 @@ int xradio_queue_put(struct xradio_queue *queue, struct sk_buff *skb,
 		item->generation  = 1; /* avoid packet ID is 0.*/
 		item->pack_stk_wr = 0;
 		item->packetID = xradio_queue_make_packet_id(
-			queue->generation, queue->queue_id,
+#ifdef QUEUE_GEN_IF_TABLE
+			queue->generation[txpriv->if_id],
+#else
+			queue->generation,
+#endif
+			queue->queue_id,
 			item->generation, item - queue->pool,
 			txpriv->if_id, txpriv->raw_link_id);
 		item->queue_timestamp = jiffies;
@@ -493,7 +511,7 @@ int xradio_queue_get(struct xradio_queue *queue,
 	struct xradio_queue_stats *stats = queue->stats;
 	bool wakeup_stats = false;
 #ifdef CONFIG_XRADIO_TESTMODE
-	struct timeval tmval;
+	struct timespec64 tmval;
 #endif /*CONFIG_XRADIO_TESTMODE*/
 
 	spin_lock_bh(&queue->lock);
@@ -601,7 +619,11 @@ int xradio_queue_requeue(struct xradio_queue *queue, u32 packetID, bool check)
 
 	spin_lock_bh(&queue->lock);
 	SYS_BUG(queue_id != queue->queue_id);
+#ifdef QUEUE_GEN_IF_TABLE
+	if (unlikely(queue_generation != queue->generation[if_id])) {
+#else
 	if (unlikely(queue_generation != queue->generation)) {
+#endif
 		ret = -ENOENT;
 	} else if (unlikely(item_id >= (unsigned) queue->capacity)) {
 		SYS_WARN(1);
@@ -659,7 +681,13 @@ int xradio_queue_requeue_all(struct xradio_queue *queue)
 
 		++item->generation;
 		item->packetID = xradio_queue_make_packet_id(
-			queue->generation, queue->queue_id,
+#ifdef QUEUE_GEN_IF_TABLE
+			queue->generation[item->txpriv.if_id],
+#else
+			queue->generation,
+#endif
+			queue->queue_id,
+
 			item->generation, item - queue->pool,
 			item->txpriv.if_id, item->txpriv.raw_link_id);
 		list_move(&item->head, &queue->queue);
@@ -690,7 +718,11 @@ int xradio_queue_remove(struct xradio_queue *queue, u32 packetID)
 	spin_lock_bh(&queue->lock);
 	SYS_BUG(queue_id != queue->queue_id);
 	/*TODO:COMBO:Add check for interface ID also */
+#ifdef QUEUE_GEN_IF_TABLE
+	if (unlikely(queue_generation != queue->generation[if_id])) {
+#else
 	if (unlikely(queue_generation != queue->generation)) {
+#endif
 		ret = -ENOENT;
 	} else if (unlikely(item_id >= (unsigned) queue->capacity)) {
 		SYS_WARN(1);
@@ -712,7 +744,7 @@ int xradio_queue_remove(struct xradio_queue *queue, u32 packetID)
 		spin_lock_bh(&hw_priv->tsm_lock);
 		if (hw_priv->start_stop_tsm.start) {
 			if (queue_id == hw_priv->tsm_info.ac) {
-				struct timeval tmval;
+				struct timespec64 tmval;
 				unsigned long queue_delay;
 				unsigned long media_delay;
 				xr_do_gettimeofday(&tmval);
@@ -788,7 +820,11 @@ int xradio_queue_get_skb(struct xradio_queue *queue, u32 packetID,
 	spin_lock_bh(&queue->lock);
 	SYS_BUG(queue_id != queue->queue_id);
 	/* TODO:COMBO: Add check for interface ID here */
+#ifdef QUEUE_GEN_IF_TABLE
+	if (unlikely(queue_generation != queue->generation[if_id])) {
+#else
 	if (unlikely(queue_generation != queue->generation)) {
+#endif
 		txrx_printk(XRADIO_DBG_WARN, "%s, queue generation match failed!\n",
 				__func__);
 		ret = -ENOENT;

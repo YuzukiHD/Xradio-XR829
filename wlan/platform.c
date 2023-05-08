@@ -22,7 +22,6 @@
 #include "xradio.h"
 #include "platform.h"
 #include "sbus.h"
-#include <linux/sunxi-gpio.h>
 #include <linux/gpio.h>
 #include <linux/types.h>
 //#include <linux/power/scenelock.h>
@@ -37,6 +36,7 @@ MODULE_ALIAS("xradio_wlan");
 extern void sunxi_wlan_set_power(bool on);
 extern int sunxi_wlan_get_bus_index(void);
 extern int sunxi_wlan_get_oob_irq(int *, int *);
+extern void sunxi_bluetooth_set_power(bool on_off);
 
 static int wlan_bus_id;
 static u32 gpio_irq_handle;
@@ -75,6 +75,12 @@ int xradio_wlan_power(int on)
 	sunxi_wlan_set_power(on);
 	mdelay(100);
 	return ret;
+}
+
+void xradio_bt_power(int on_off)
+{
+	sunxi_bluetooth_set_power(on_off);
+	mdelay(100);
 }
 
 void xradio_sdio_detect(int enable)

@@ -44,6 +44,7 @@ void xradio_configure_filter(struct ieee80211_hw *dev,
 							unsigned int changed_flags,
 							unsigned int *total_flags,
 							u64 multicast);
+
 int xradio_conf_tx(struct ieee80211_hw *dev, struct ieee80211_vif *vif,
 				   u16 queue, const struct ieee80211_tx_queue_params *params);
 int xradio_get_stats(struct ieee80211_hw *dev,
@@ -55,17 +56,16 @@ int xradio_get_tx_stats(struct ieee80211_hw *dev,
 int xradio_set_key(struct ieee80211_hw *dev, enum set_key_cmd cmd,
 				   struct ieee80211_vif *vif, struct ieee80211_sta *sta,
 				   struct ieee80211_key_conf *key);
-int xradio_set_rts_threshold(struct ieee80211_hw *hw,
-							 struct ieee80211_vif *vif, u32 value);
+int xradio_set_rts_thresholds(struct ieee80211_hw *hw, u32 value);
 void xradio_flush(struct ieee80211_hw *hw,
 				  struct ieee80211_vif *vif,
+				  u32 queues,
 				  bool drop);
 int xradio_remain_on_channel(struct ieee80211_hw *hw,
 							 struct ieee80211_vif *vif,
 							 struct ieee80211_channel *chan,
-							 enum nl80211_channel_type channel_type,
-							 int duration, u64 cookie);
-int xradio_cancel_remain_on_channel(struct ieee80211_hw *hw);
+							 int duration, enum ieee80211_roc_type type);
+int xradio_cancel_remain_on_channel(struct ieee80211_hw *hw, struct ieee80211_vif *vif);
 int xradio_set_arpreply(struct ieee80211_hw *hw, struct ieee80211_vif *vif);
 u64 xradio_prepare_multicast(struct ieee80211_hw *hw,
 							 struct ieee80211_vif *vif,

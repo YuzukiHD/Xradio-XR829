@@ -22,7 +22,7 @@
 #include "wep.h"
 
 
-int mac80211_wep_init(struct ieee80211_local *local)
+int ieee80211_wep_init(struct ieee80211_local *local)
 {
 	/* start WEP IV from a random value */
 	get_random_bytes(&local->wep_iv, IEEE80211_WEP_IV_LEN);
@@ -107,7 +107,7 @@ static void ieee80211_wep_remove_iv(struct ieee80211_local *local,
 /* Perform WEP encryption using given key. data buffer must have tailroom
  * for 4-byte ICV. data_len must not include this ICV. Note: this function
  * does _not_ add IV. data = RC4(data | CRC32(data)) */
-int mac80211_wep_encrypt_data(struct arc4_ctx *ctx, u8 *rc4key,
+int ieee80211_wep_encrypt_data(struct arc4_ctx *ctx, u8 *rc4key,
 			       size_t klen, u8 *data, size_t data_len)
 {
 	__le32 icv;
@@ -130,7 +130,7 @@ int mac80211_wep_encrypt_data(struct arc4_ctx *ctx, u8 *rc4key,
  *
  * WEP frame payload: IV + TX key idx, RC4(data), ICV = RC4(CRC32(data))
  */
-int mac80211_wep_encrypt(struct ieee80211_local *local,
+int ieee80211_wep_encrypt(struct ieee80211_local *local,
 			  struct sk_buff *skb,
 			  const u8 *key, int keylen, int keyidx)
 {
@@ -156,7 +156,7 @@ int mac80211_wep_encrypt(struct ieee80211_local *local,
 	/* Add room for ICV */
 	skb_put(skb, IEEE80211_WEP_ICV_LEN);
 
-	return mac80211_wep_encrypt_data(&local->wep_tx_ctx, rc4key, keylen + 3,
+	return ieee80211_wep_encrypt_data(&local->wep_tx_ctx, rc4key, keylen + 3,
 					  iv + IEEE80211_WEP_IV_LEN, len);
 }
 
@@ -164,7 +164,7 @@ int mac80211_wep_encrypt(struct ieee80211_local *local,
 /* Perform WEP decryption using given key. data buffer includes encrypted
  * payload, including 4-byte ICV, but _not_ IV. data_len must not include ICV.
  * Return 0 on success and -1 on ICV mismatch. */
-int mac80211_wep_decrypt_data(struct arc4_ctx *ctx, u8 *rc4key,
+int ieee80211_wep_decrypt_data(struct arc4_ctx *ctx, u8 *rc4key,
 			       size_t klen, u8 *data, size_t data_len)
 {
 	__le32 crc;
@@ -224,7 +224,7 @@ static int ieee80211_wep_decrypt(struct ieee80211_local *local,
 	/* Copy rest of the WEP key (the secret part) */
 	memcpy(rc4key + 3, key->conf.key, key->conf.keylen);
 
-	if (mac80211_wep_decrypt_data(&local->wep_rx_ctx, rc4key, klen,
+	if (ieee80211_wep_decrypt_data(&local->wep_rx_ctx, rc4key, klen,
 				       skb->data + hdrlen +
 				       IEEE80211_WEP_IV_LEN, len))
 		ret = -1;
@@ -239,23 +239,8 @@ static int ieee80211_wep_decrypt(struct ieee80211_local *local,
 	return ret;
 }
 
-bool ieee80211_wep_is_weak_iv(struct sk_buff *skb,
-			      struct ieee80211_key *key)
-{
-	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)skb->data;
-	unsigned int hdrlen;
-	u8 *ivpos;
-	u32 iv;
-
-	hdrlen = ieee80211_hdrlen(hdr->frame_control);
-	ivpos = skb->data + hdrlen;
-	iv = (ivpos[0] << 16) | (ivpos[1] << 8) | ivpos[2];
-
-	return ieee80211_wep_weak_iv(iv, key->conf.keylen);
-}
-
 ieee80211_rx_result
-mac80211_crypto_wep_decrypt(struct ieee80211_rx_data *rx)
+ieee80211_crypto_wep_decrypt(struct ieee80211_rx_data *rx)
 {
 	struct sk_buff *skb = rx->skb;
 	struct ieee80211_rx_status *status = IEEE80211_SKB_RXCB(skb);
@@ -276,10 +261,8 @@ mac80211_crypto_wep_decrypt(struct ieee80211_rx_data *rx)
 			return RX_DROP_UNUSABLE;
 		ieee80211_wep_remove_iv(rx->local, rx->skb, rx->key);
 		/* remove ICV */
-		/* NOTE: !(status->flag & RX_FLAG_ICV_STRIPPED) maybe used for
-		 * controlompatibility with other versions of umac.
-		 */
-		if (pskb_trim(rx->skb, rx->skb->len - IEEE80211_WEP_ICV_LEN))
+		if (!(status->flag & RX_FLAG_ICV_STRIPPED) &&
+		    pskb_trim(rx->skb, rx->skb->len - IEEE80211_WEP_ICV_LEN))
 			return RX_DROP_UNUSABLE;
 	}
 
@@ -292,7 +275,7 @@ static int wep_encrypt_skb(struct ieee80211_tx_data *tx, struct sk_buff *skb)
 	struct ieee80211_key_conf *hw_key = info->control.hw_key;
 
 	if (!hw_key) {
-		if (mac80211_wep_encrypt(tx->local, skb, tx->key->conf.key,
+		if (ieee80211_wep_encrypt(tx->local, skb, tx->key->conf.key,
 					  tx->key->conf.keylen,
 					  tx->key->conf.keyidx))
 			return -1;
@@ -308,20 +291,18 @@ static int wep_encrypt_skb(struct ieee80211_tx_data *tx, struct sk_buff *skb)
 }
 
 ieee80211_tx_result
-mac80211_crypto_wep_encrypt(struct ieee80211_tx_data *tx)
+ieee80211_crypto_wep_encrypt(struct ieee80211_tx_data *tx)
 {
 	struct sk_buff *skb;
 
-	mac80211_tx_set_protected(tx);
+	ieee80211_tx_set_protected(tx);
 
-	skb = tx->skb;
-	do {
+	skb_queue_walk(&tx->skbs, skb) {
 		if (wep_encrypt_skb(tx, skb) < 0) {
 			I802_DEBUG_INC(tx->local->tx_handlers_drop_wep);
 			return TX_DROP;
 		}
-	} while ((skb = skb->next));
-
+	}
 
 	return TX_CONTINUE;
 }

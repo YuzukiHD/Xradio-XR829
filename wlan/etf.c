@@ -1094,8 +1094,8 @@ int xradio_etf_init(void)
 	etf_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 	sema_init(&etf_priv.etf_lock, 1);
 	etf_priv.etf_state = ETF_STAT_NULL;
-	etf_priv.fw_path  = NULL;
-	etf_priv.sdd_path = NULL;
+	etf_priv.fw_path  = XR829_ETF_FILE;
+	etf_priv.sdd_path = XR829_SDD_FILE;
 	etf_priv.adapter = xradio_adapter_init(&xradio_etf_proc);
 	etf_adapter_version_init(&etf_priv);
 	return ret;

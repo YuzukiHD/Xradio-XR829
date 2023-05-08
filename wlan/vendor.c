@@ -66,6 +66,46 @@ xradio_cfg80211_mkeep_alive_policy[MKEEP_ALIVE_ATTRIBUTE_MAX+1] = {
 	[MKEEP_ALIVE_ATTRIBUTE_PERIOD_MSEC]	= { .type = NLA_U32 },
 };
 
+static const struct nla_policy
+xradio_vendor_subcmd_set_mac_policy[WLAN_VENDOR_ATTR_DRIVER_MAX + 1] = {
+	[0] = {.type = NLA_UNSPEC },
+	[WLAN_VENDOR_ATTR_DRIVER_MAC_ADDR] = { .type = NLA_MSECS, .len  = ETH_ALEN },
+};
+
+static int xradio_vendor_subcmd_set_mac(struct wiphy *wiphy,
+				 struct wireless_dev *wdev,
+				 const void *data, int data_len)
+{
+	int ret = 0, rem, type;
+	u8 mac[ETH_ALEN];
+	const struct nlattr *iter;
+
+	nla_for_each_attr(iter, data, data_len, rem) {
+		type = nla_type(iter);
+		switch (type) {
+		case WLAN_VENDOR_ATTR_DRIVER_MAC_ADDR:
+			memcpy(mac, nla_data(iter), ETH_ALEN);
+			pr_err("%s, %02X:%02X:%02X:%02X:%02X:%02X\n", __func__,
+					mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+			break;
+		default:
+			printk("Unknown type: %d\n", type);
+			ret = -EINVAL;
+			break;
+		}
+	}
+	if (ret < 0) {
+		printk("%s is failed ret: %d\n", __func__, ret);
+		goto exit;
+	}
+
+	/* Handle mac address set here */
+
+exit:
+	return ret;
+
+}
+
 static const struct wiphy_vendor_command xradio_nl80211_vendor_commands[] = {
 	[NL80211_VENDOR_SUBCMD_DO_ACS_INDEX] = {
 		.info.vendor_id = XRADIO_NL80211_VENDOR_ID,
@@ -104,6 +144,18 @@ static const struct wiphy_vendor_command xradio_nl80211_vendor_commands[] = {
 		.dumpit = xradio_dump_interface,
 		.policy = xradio_cfg80211_mkeep_alive_policy,
 		.maxattr = MKEEP_ALIVE_ATTRIBUTE_MAX
+	},
+	{
+		{
+			.vendor_id = XRADIO_NL80211_ANDROID_ID,
+			.subcmd = NL80211_VENDOR_SUBCMD_SET_MAC,
+		},
+		.flags = WIPHY_VENDOR_CMD_NEED_WDEV |
+			 WIPHY_VENDOR_CMD_NEED_RUNNING,
+		.doit = xradio_vendor_subcmd_set_mac,
+		.dumpit = xradio_dump_interface,
+		.policy = xradio_vendor_subcmd_set_mac_policy,
+		.maxattr = WLAN_VENDOR_ATTR_DRIVER_MAX
 	},
 };
 
@@ -306,14 +358,17 @@ static void keep_alive_send(struct ieee80211_local *local, struct net_device *de
 	skb_put(skb, pkt_len);
 	memcpy(skb->data, frame_8023, pkt_len);
 
-	mac80211_subif_start_xmit(skb, dev);
+	ieee80211_subif_start_xmit(skb, dev);
 
 }
 
 
 static int
-keep_alive_cmp(void *priv,
-	struct list_head *a, struct list_head *b)
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 13, 0))
+keep_alive_cmp(void *priv, const struct list_head *a, const struct list_head *b)
+#else
+keep_alive_cmp(void *priv, struct list_head *a, struct list_head *b)
+#endif
 {
 	struct keepalivenode *ap = container_of(a, struct keepalivenode, list);
 	struct keepalivenode *bp = container_of(b, struct keepalivenode, list);
@@ -613,18 +668,18 @@ void xradio_vendor_init(struct wiphy *wiphy)
 	return;
 }
 
-void xr_do_gettimeofday(struct timeval *tv)
+void xr_do_gettimeofday(struct timespec64 *tv)
 {
-	struct timespec now;
+	struct timespec64 now;
 
-	getnstimeofday(&now);
+	now = ktime_to_timespec64(ktime_get_boottime());
 	tv->tv_sec = now.tv_sec;
-	tv->tv_usec = now.tv_nsec/1000;
+	tv->tv_nsec = now.tv_nsec;
 }
 
-void xr_get_monotonic_boottime(struct timespec *ts)
+void xr_get_monotonic_boottime(struct timespec64 *ts)
 {
-	*ts = ktime_to_timespec(ktime_get_boottime());
+	*ts = ktime_to_timespec64(ktime_get_boottime());
 }
 
 

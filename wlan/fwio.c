@@ -97,6 +97,10 @@ static int xradio_parse_sdd(struct xradio_common *hw_priv, u32 *dpll)
 	switch (hw_priv->hw_revision) {
 	case XR829_HW_REV0:
 		sdd_path = XR829_SDD_FILE;
+#ifdef CONFIG_XRADIO_ETF
+		if (etf_is_connect())
+			sdd_path = etf_get_sddpath();
+#endif
 		break;
 	default:
 		xradio_dbg(XRADIO_DBG_ERROR,
@@ -104,15 +108,6 @@ static int xradio_parse_sdd(struct xradio_common *hw_priv, u32 *dpll)
 		return ret;
 	}
 
-#ifdef CONFIG_XRADIO_ETF
-	if (etf_is_connect()) {
-		const char *etf_sdd = etf_get_sddpath();
-		if (etf_sdd != NULL)
-			sdd_path = etf_sdd;
-		else
-			etf_set_sddpath(sdd_path);
-	}
-#endif
 	ret = request_firmware(&hw_priv->sdd, sdd_path, hw_priv->pdev);
 	if (unlikely(ret)) {
 		xradio_dbg(XRADIO_DBG_ERROR, "%s: can't load sdd file %s.\n",
@@ -276,15 +271,8 @@ static int xradio_firmware(struct xradio_common *hw_priv)
 	case XR829_HW_REV0:
 		fw_path = XR829_FIRMWARE;
 #ifdef CONFIG_XRADIO_ETF
-		if (etf_is_connect()) {
-			const char *etf_fw = etf_get_fwpath();
-			if (etf_fw != NULL)
-				fw_path = etf_fw;
-			else {
-				fw_path = XR829_ETF_FIRMWARE;
-				etf_set_fwpath(fw_path);
-			}
-		}
+		if (etf_is_connect())
+			fw_path = etf_get_fwpath();
 #endif
 		break;
 	default:
@@ -503,8 +491,8 @@ int HIF_R_W_TEST(struct xradio_common *hw_priv)
 {
 	int time;
 	int i;
-	struct timeval start;   //linux5.4 commit 33e26418193f58d1895f2f968e1953b1caf8deb7
-	struct timeval end;
+	struct timespec64 start;   //linux5.4 commit 33e26418193f58d1895f2f968e1953b1caf8deb7
+	struct timespec64 end;
 	unsigned int addr;
 	char *write_buf;
 	char *read_buf;
@@ -553,7 +541,7 @@ int HIF_R_W_TEST(struct xradio_common *hw_priv)
 
 	printk(KERN_ERR"[HIF test] --- <read> --- end~~\n");
 	xr_do_gettimeofday(&end);
-	time = 1000 * (end.tv_sec - start.tv_sec) + (end.tv_usec - start.tv_usec) / 1000;
+	time = 1000 * (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1000000;
 	kfree(write_buf);
 	kfree(read_buf);
 	return 0;
@@ -639,6 +627,7 @@ int xradio_load_firmware(struct xradio_common *hw_priv)
 	ret = xradio_reg_bit_operate(hw_priv, HIF_CONTROL_REG_ID, HIF_CTRL_WUP_BIT, 0);
 	if (ret < 0) {
 		xradio_dbg(XRADIO_DBG_ERROR, "%s: device wake up failed.\n", __func__);
+		hw_priv->hw_cant_wakeup = true;
 		goto out;
 	}
 
@@ -658,6 +647,7 @@ int xradio_load_firmware(struct xradio_common *hw_priv)
 	if ((val16 & HIF_CTRL_RDY_BIT) == 0) {
 		xradio_dbg(XRADIO_DBG_ERROR, "%s: Wait for wakeup:"
 			   "device is not responding.\n", __func__);
+		hw_priv->hw_cant_wakeup = true;
 #ifdef BOOT_NOT_READY_FIX
 		hw_priv->boot_not_ready_cnt++;
 		hw_priv->boot_not_ready = 1;
@@ -675,6 +665,7 @@ int xradio_load_firmware(struct xradio_common *hw_priv)
 		goto out;
 	} else {
 		xradio_dbg(XRADIO_DBG_NIY, "WLAN device is ready.\n");
+		hw_priv->hw_cant_wakeup = false;
 	}
 
 	/* Checking for access mode and download firmware. */

@@ -28,6 +28,7 @@
 
 /*for host debuglevel*/
 #define XRADIO_DBG_DEFAULT (XRADIO_DBG_ALWY|XRADIO_DBG_ERROR|XRADIO_DBG_WARN)
+
 u8 dbg_common  = XRADIO_DBG_DEFAULT;
 u8 dbg_sbus    = XRADIO_DBG_DEFAULT;
 u8 dbg_bh      = XRADIO_DBG_DEFAULT;
@@ -165,24 +166,27 @@ static const struct file_operations fops_version = {
 static int xradio_hwinfo_show(struct seq_file *seq, void *v)
 {
 	struct xradio_common *hw_priv = seq->private;
-	u32 hw_arry[8] = { 0 };
+	u32 hw_arry[64] = { 0 };
+	int ret = -1;
+	u32 i;
+	u8 *p_data = NULL;
 
-	wsm_read_mib(hw_priv, WSM_MIB_ID_HW_INFO, (void *)&hw_arry,
-		     sizeof(hw_arry), 4);
+	ret = wsm_read_mib(hw_priv, WSM_MIB_ID_HW_INFO, (void *)&hw_arry,
+			sizeof(hw_arry), 4);
 
-	/*
-	get_random_bytes((u8 *)&hw_arry[0], 8*sizeof(u32));
-	hw_arry[0] = 0x0B140D4;
-	hw_arry[1] &= ~0xF803FFFF;
-	hw_arry[2] &= ~0xC0001FFF;
-	hw_arry[5] &= ~0xFFFFF000;
-	hw_arry[7] &= ~0xFFFC07C0;
-	*/
+	if (!ret) {
+		p_data = (u8 *)&hw_arry[0];
 
-	seq_printf(seq, "0x%08x, 0x%08x, 0x%08x, 0x%08x, "
-			"0x%08x, 0x%08x, 0x%08x, 0x%08x\n",
-			hw_arry[0], hw_arry[1], hw_arry[2], hw_arry[3],
-			hw_arry[4], hw_arry[5], hw_arry[6], hw_arry[7]);
+		for (i = 0; i < 16; i++) {
+			seq_printf(seq, "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x\n",
+				*(p_data + 0), *(p_data + 1), *(p_data + 2), *(p_data + 3),
+				*(p_data + 4), *(p_data + 5), *(p_data + 6), *(p_data + 7),
+				*(p_data + 8), *(p_data + 9), *(p_data + 10), *(p_data + 11),
+				*(p_data + 12), *(p_data + 13), *(p_data + 14), *(p_data + 15));
+			p_data += 16;
+		}
+	}
+
 	return 0;
 }
 
@@ -747,9 +751,9 @@ char *med_state_str[4] = {
 	"with wlan",
 	"with bt and wlan waiting"
 };
-char *req_type_str[11] = {
+char *req_type_str[12] = {
 	"rx_recovery", "rx_mcast", "rx_bcn", "tx_bcn", "tx_cts", "tx_high", "tx_uapsd", "fastps",
-	"scan", "pspoll", "tx_low"
+	"scan", "pspoll", "tx_low", "common"
 };
 
 static int xradio_epta_stat_show(struct seq_file *seq, void *v)
@@ -2639,11 +2643,11 @@ struct perf_info mac_tx;
 struct perf_info get_time;
 #endif
 
-struct timeval last_showtime;
-static inline u32 xradio_show_intv(struct timeval *showtime)
+struct timespec64 last_showtime;
+static inline u32 xradio_show_intv(struct timespec64 *showtime)
 {
 	u32 time_int;
-	struct timeval time_now;
+	struct timespec64 time_now;
 	xr_do_gettimeofday(&time_now);
 	time_int = (time_now.tv_sec - showtime->tv_sec) * 100000 + \
 			    (time_now.tv_usec - showtime->tv_usec) / 10;
@@ -2968,8 +2972,8 @@ u8 hwt_tx_en;
 u8 hwt_tx_cfm;	/*confirm interval*/
 u16 hwt_tx_len;
 u16 hwt_tx_num;
-struct timeval hwt_start_time = { 0 };
-struct timeval hwt_end_time = { 0 };
+struct timespec64 hwt_start_time = { 0 };
+struct timespec64 hwt_end_time = { 0 };
 
 int wsm_hwt_cmd(struct xradio_common *hw_priv, void *arg,
 		size_t arg_size);
@@ -3346,6 +3350,42 @@ static const struct file_operations fops_short_dump = {
 	.open = xradio_generic_open,
 	.write = xradio_short_dump_write,
 	.read = xradio_short_dump_read,
+	.llseek = default_llseek,
+};
+
+static ssize_t xradio_ce_test_read(struct file *file,
+	char __user *user_buf, size_t count, loff_t *ppos)
+{
+	return 0;
+}
+
+static ssize_t xradio_ce_test_write(struct file *file,
+	const char __user *user_buf, size_t count, loff_t *ppos)
+{
+	struct xradio_common *hw_priv = file->private_data;
+	u32 ce_test_en = 0;
+	char buf[12] = { 0 };
+	char *endptr = NULL;
+
+	count = (count > 11 ? 11 : count);
+	if (!count)
+		return -EINVAL;
+
+       if (copy_from_user(buf, user_buf, count))
+		return -EFAULT;
+
+	ce_test_en = simple_strtoul(buf, &endptr, 10);
+	xradio_dbg(XRADIO_DBG_ALWY, "%s ce_test_en %u\n", __func__, ce_test_en);
+	wsm_write_mib(hw_priv, WSM_MIB_ID_CE_TEST_CONFIG, &ce_test_en,
+				sizeof(ce_test_en), 0);
+
+	return count;
+}
+
+static const struct file_operations fops_ce_test = {
+	.open = xradio_generic_open,
+	.write = xradio_ce_test_write,
+	.read = xradio_ce_test_read,
 	.llseek = default_llseek,
 };
 
@@ -3870,74 +3910,58 @@ int xradio_host_dbg_init(void)
 	if (!debugfs_host)
 		ERR_LINE;
 
-	if (!debugfs_create_x8("dbg_common", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_common))
-		ERR_LINE;
+	debugfs_create_x8("dbg_common", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_common);
 
-	if (!debugfs_create_x8("dbg_sbus", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_sbus))
-		ERR_LINE;
+	debugfs_create_x8("dbg_sbus", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_sbus);
 
-	if (!debugfs_create_x8("dbg_ap", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_ap))
-		ERR_LINE;
+	debugfs_create_x8("dbg_ap", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_ap);
 
-	if (!debugfs_create_x8("dbg_sta", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_sta))
-		ERR_LINE;
+	debugfs_create_x8("dbg_sta", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_sta);
 
-	if (!debugfs_create_x8("dbg_scan", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_scan))
-		ERR_LINE;
+	debugfs_create_x8("dbg_scan", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_scan);
 
-	if (!debugfs_create_x8("dbg_bh", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_bh))
-		ERR_LINE;
+	debugfs_create_x8("dbg_bh", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_bh);
 
-	if (!debugfs_create_x8("dbg_txrx", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_txrx))
-		ERR_LINE;
+	debugfs_create_x8("dbg_txrx", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_txrx);
 
-	if (!debugfs_create_x8("dbg_wsm", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_wsm))
-		ERR_LINE;
+	debugfs_create_x8("dbg_wsm", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_wsm);
 
-	if (!debugfs_create_x8("dbg_pm", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_pm))
-		ERR_LINE;
+	debugfs_create_x8("dbg_pm", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_pm);
 
 #ifdef CONFIG_XRADIO_ITP
-	if (!debugfs_create_x8("dbg_itp", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_itp))
-		ERR_LINE;
+	debugfs_create_x8("dbg_itp", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_itp);
 #endif
 
 #ifdef CONFIG_XRADIO_ETF
-	if (!debugfs_create_x8("dbg_etf", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_etf))
-		ERR_LINE;
+	debugfs_create_x8("dbg_etf", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_etf);
 #endif
 
-	if (!debugfs_create_x8("dbg_logfile", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_logfile))
-		ERR_LINE;
+	debugfs_create_x8("dbg_logfile", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_logfile);
 
-	if (!debugfs_create_x8("dbg_tpa_node", S_IRUSR | S_IWUSR,
-				   debugfs_host, &tpa_node_dbg))
-		ERR_LINE;
+	debugfs_create_x8("dbg_tpa_node", S_IRUSR | S_IWUSR,
+				   debugfs_host, &tpa_node_dbg);
 
-	if (!debugfs_create_u32("set_sdio_clk", S_IRUSR | S_IWUSR,
-				   debugfs_host, &dbg_sdio_clk))
-		ERR_LINE;
+	debugfs_create_u32("set_sdio_clk", S_IRUSR | S_IWUSR,
+				   debugfs_host, &dbg_sdio_clk);
 
-	if (!debugfs_create_u32("tx_burst_limit", S_IRUSR | S_IWUSR,
-				   debugfs_host, &tx_burst_limit))
-		ERR_LINE;
+	debugfs_create_u32("tx_burst_limit", S_IRUSR | S_IWUSR,
+				   debugfs_host, &tx_burst_limit);
 
 #ifdef ERROR_HANG_DRIVER
-	if (!debugfs_create_u8("error_hang_driver", S_IRUSR | S_IWUSR,
-				   debugfs_host, &error_hang_driver))
-		ERR_LINE;
+	debugfs_create_u8("error_hang_driver", S_IRUSR | S_IWUSR,
+				   debugfs_host, &error_hang_driver);
 #endif
 
 	return 0;
@@ -4124,6 +4148,9 @@ int xradio_debug_init_common(struct xradio_common *hw_priv)
 	if (!debugfs_create_file("wsm_dump_size", S_IRUSR | S_IWUSR,
 		d->debugfs_phy, hw_priv, &fops_short_dump))
 		ERR_LINE;
+	if (!debugfs_create_file("ce_test", S_IRUSR | S_IWUSR,
+		d->debugfs_phy, hw_priv, &fops_ce_test))
+		ERR_LINE;
 
 #if (SUPPORT_EPTA)
 	if (!debugfs_create_file("epta_stat", S_IRUSR, d->debugfs_phy,
@@ -4161,12 +4188,9 @@ int xradio_debug_init_common(struct xradio_common *hw_priv)
 
 #if (DGB_XRADIO_QC)
 	/*for QC apk read.*/
-	if (debugfs_host && !debugfs_hwinfo) {
-		debugfs_hwinfo = debugfs_create_file("hwinfo", S_IRUSR | S_IWUSR,
-				debugfs_host, hw_priv, &fops_hwinfo);
-		if (!debugfs_hwinfo)
-			ERR_LINE;
-	}
+	if (!debugfs_create_file("hwinfo", S_IWUSR, d->debugfs_phy,
+		hw_priv, &fops_hwinfo))
+	ERR_LINE;
 
 	if (!debugfs_create_file("temperature", S_IRUSR, d->debugfs_phy,
 		hw_priv, &fops_temperature))
@@ -4408,11 +4432,10 @@ void xradio_parse_frame(u8 *mac_data, u8 iv_len, u16 flags, u8 if_id)
 
 		/*for more information about action frames.*/
 		if (FRAME_TYPE(action)) {
-			u8* encrypt_frame = NULL;
+			u8 *encrypt_frame = NULL;
 			struct ieee80211_mgmt *mgmt = (struct ieee80211_mgmt *)frame;
-			if (frame->frame_control & __cpu_to_le32(IEEE80211_FCTL_PROTECTED) && (flags & PF_RX))
-			{
-				encrypt_frame = (u8*)frame + IEEE80211_CCMP_256_HDR_LEN;
+			if (frame->frame_control & __cpu_to_le32(IEEE80211_FCTL_PROTECTED) && (flags & PF_RX)) {
+				encrypt_frame = (u8 *)frame + IEEE80211_CCMP_256_HDR_LEN;
 				mgmt = (struct ieee80211_mgmt *)encrypt_frame;
 			}
 			FT_MSG_PUT(PF_MGMT, "%s", "action");
@@ -4565,7 +4588,7 @@ int xradio_logfile(char *buffer, int buf_len, u8 b_time)
 		}
 		set_fs(old_fs);
 		if (b_time) {
-			struct timeval time_now = { 0 };
+			struct timespec64 time_now = { 0 };
 			struct rtc_time tm;
 			char time_label[T_LABEL_LEN] = { 0 };
 			xr_do_gettimeofday(&time_now);

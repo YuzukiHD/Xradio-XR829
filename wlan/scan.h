@@ -53,10 +53,11 @@ struct xradio_scan {
 	unsigned long scan_failed_timestamp;
 	u8 scan_failed_cnt;
 #endif
+	u8 scan_probe_resp;
 };
 
 int xradio_hw_scan(struct ieee80211_hw *hw, struct ieee80211_vif *vif,
-		   struct cfg80211_scan_request *req);
+		   struct ieee80211_scan_request *req);
 #ifdef ROAM_OFFLOAD
 int xradio_hw_sched_scan_start(struct ieee80211_hw *hw,
 			       struct ieee80211_vif *vif,

@@ -17,7 +17,8 @@
 #define XR829_BOOTLOADER    (FIRMWARE_BASE_PATH "boot_xr829.bin")
 #define XR829_FIRMWARE      (FIRMWARE_BASE_PATH "fw_xr829.bin")
 #define XR829_SDD_FILE      (FIRMWARE_BASE_PATH "sdd_xr829.bin")
-#define XR829_ETF_FIRMWARE  (FIRMWARE_BASE_PATH "etf_xr829.bin")
+#define XR829_ETF_FILE      (FIRMWARE_BASE_PATH "etf_xr829.bin")
+
 
 #define SDD_PTA_CFG_ELT_ID              0xEB
 #define SDD_REFERENCE_FREQUENCY_ELT_ID  0xC5

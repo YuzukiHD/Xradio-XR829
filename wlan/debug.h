@@ -143,11 +143,11 @@ extern struct perf_info get_time;
 
 #include <linux/rtc.h>
 #include <linux/time.h>
-static inline void perf_info_stamp(struct timeval *oldtime,
-	struct perf_info *info, u32 size, struct timeval *gettime)
+static inline void perf_info_stamp(struct timespec64 *oldtime,
+	struct perf_info *info, u32 size, struct timespec64 *gettime)
 {
 	u32 time_int;
-	struct timeval newtime;
+	struct timespec64 newtime;
 	xr_do_gettimeofday(&newtime);
 	time_int = (newtime.tv_sec - oldtime->tv_sec) * 1000000 + \
 			   (long)(newtime.tv_usec - oldtime->tv_usec);

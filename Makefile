@@ -7,15 +7,15 @@ CONFIG_XRMAC_DEBUGFS = n
 CONFIG_XRADIO_SDIO = y
 CONFIG_XRADIO_NON_POWER_OF_TWO_BLOCKSIZES = y
 CONFIG_XRADIO_USE_GPIO_IRQ = y
-CONFIG_XRADIO_SUSPEND_POWER_OFF = n
+CONFIG_XRADIO_SUSPEND_POWER_OFF := $(CONFIG_XR829_SUSPEND_POWER_OFF)
 CONFIG_XRADIO_EXTEND_SUSPEND = n
 CONFIG_XRADIO_NOMAL_SUSPEND_FORCE = n
 CONFIG_XRADIO_DEBUG = y
 CONFIG_XRADIO_ETF = y
 CONFIG_XRADIO_DUMP_ON_ERROR = n
 CONFIG_XRADIO_DEBUGFS = y
-CONFIG_XRADIO_VERBOSE_DEBUG = y
-CONFIG_XRADIO_DRIVER_API_TRACER = y
+CONFIG_XRMAC_VERBOSE_DEBUG = y
+CONFIG_XRMAC_DRIVER_API_TRACER = y
 CONFIG_MODULE_NAME = xr829
 
 define boolen_flag
@@ -31,6 +31,7 @@ DRV_FLAGS += $(call boolen_flag,CONFIG_XRMAC_RC_PID,y)
 DRV_FLAGS += $(call boolen_flag,CONFIG_XRMAC_RC_MINSTREL,y)
 DRV_FLAGS += $(call boolen_flag,CONFIG_XRMAC_RC_MINSTREL_HT,y)
 DRV_FLAGS += $(call boolen_flag,CONFIG_XRMAC_DEBUGFS,y)
+DRV_FLAGS += $(call boolen_flag,CONFIG_XRMAC_VERBOSE_DEBUG,y)
 DRV_FLAGS += $(call boolen_flag,CONFIG_XRADIO_SDIO,y)
 DRV_FLAGS += $(call boolen_flag,CONFIG_XRADIO_NON_POWER_OF_TWO_BLOCKSIZES,y)
 DRV_FLAGS += $(call boolen_flag,CONFIG_XRADIO_USE_GPIO_IRQ,y)
@@ -43,8 +44,11 @@ DRV_FLAGS += $(call boolen_flag,CONFIG_XRADIO_DUMP_ON_ERROR,y)
 DRV_FLAGS += $(call boolen_flag,CONFIG_XRADIO_DEBUGFS,y)
 
 ccflags-y += $(DRV_FLAGS)
+# include/linux/stdarg.h and clang-r450784d/lib64/clang/14.0.6/include/stdarg.h
+ccflags-y += -Wno-macro-redefined
 
 NOSTDINC_FLAGS := -I$(srctree)/$(src)/include/
+#NOSTDINC_FLAGS += -I$(srctree)/$(src)/include/uapi/
 
 ldflags-y += --strip-debug
 
@@ -55,21 +59,23 @@ xradio_mac-y := \
 	umac/sta_info.o \
 	umac/wep.o \
 	umac/wpa.o \
-	umac/wapi.o \
 	umac/scan.o \
 	umac/offchannel.o \
 	umac/ht.o \
+	umac/vht.o \
+	umac/he.o \
 	umac/agg-tx.o \
 	umac/agg-rx.o \
 	umac/ibss.o \
 	umac/mlme.o \
-	umac/work.o \
 	umac/iface.o \
 	umac/rate.o \
 	umac/michael.o \
 	umac/tkip.o \
-	umac/aes_ccm.o \
+	umac/aead_api.o \
+	umac/aes_gmac.o \
 	umac/aes_cmac.o \
+	umac/fils_aead.o \
 	umac/cfg.o \
 	umac/rx.o \
 	umac/spectmgmt.o \
@@ -77,9 +83,11 @@ xradio_mac-y := \
 	umac/key.o \
 	umac/util.o \
 	umac/wme.o \
-	umac/event.o \
-	umac/average.o \
-	umac/chan.o
+	umac/chan.o \
+	umac/ethtool.o \
+	umac/ocb.o \
+	umac/tdls.o \
+	umac/trace.o \
 
 xradio_mac-$(CONFIG_XRMAC_LEDS) += umac/led.o
 xradio_mac-$(CONFIG_XRMAC_DEBUGFS) += \
@@ -92,16 +100,18 @@ xradio_mac-$(CONFIG_XRMAC_MESH) += \
 	umac/mesh.o \
 	umac/mesh_pathtbl.o \
 	umac/mesh_plink.o \
-	umac/mesh_hwmp.o
+	umac/mesh_hwmp.o \
+	umac/mesh_ps.o \
+	umac/mesh_sync.o
 
 xradio_mac-$(CONFIG_PM) += umac/pm.o
 
-xradio_mac-$(CONFIG_XRMAC_DRIVER_API_TRACER) += umac/driver-trace.o
+xradio_mac-$(CONFIG_XRMAC_DRIVER_API_TRACER) += umac/driver-ops.o
 CFLAGS_driver-trace.o := -I$(src)
 
 # objects for PID algorithm
-rc80211_pid-y := umac/rc80211_pid_algo.o
-rc80211_pid-$(CONFIG_XRMAC_DEBUGFS) += umac/rc80211_pid_debugfs.o
+#rc80211_pid-y := umac/rc80211_pid_algo.o
+#rc80211_pid-$(CONFIG_XRMAC_DEBUGFS) += umac/rc80211_pid_debugfs.o
 
 rc80211_minstrel-y := umac/rc80211_minstrel.o
 rc80211_minstrel-$(CONFIG_XRMAC_DEBUGFS) += umac/rc80211_minstrel_debugfs.o
@@ -109,7 +119,7 @@ rc80211_minstrel-$(CONFIG_XRMAC_DEBUGFS) += umac/rc80211_minstrel_debugfs.o
 rc80211_minstrel_ht-y := umac/rc80211_minstrel_ht.o
 rc80211_minstrel_ht-$(CONFIG_XRMAC_DEBUGFS) += umac/rc80211_minstrel_ht_debugfs.o
 
-xradio_mac-$(CONFIG_XRMAC_RC_PID) += $(rc80211_pid-y)
+#xradio_mac-$(CONFIG_XRMAC_RC_PID) += $(rc80211_pid-y)
 xradio_mac-$(CONFIG_XRMAC_RC_MINSTREL) += $(rc80211_minstrel-y)
 xradio_mac-$(CONFIG_XRMAC_RC_MINSTREL_HT) += $(rc80211_minstrel_ht-y)
 
@@ -203,7 +213,7 @@ ccflags-y += -DBOOT_NOT_READY_FIX
 ## for interal debug.
 #ccflags-y += -DSUPPORT_FW_DBG_INF
 #ccflags-y += -DERROR_HANG_DRIVER
-
+ccflags-y += -DQUEUE_GEN_IF_TABLE
 # Debug for hwx_BUG12:P2P setting crash
 ccflags-y += -DDEBUG_P2P_SETTING_CRASH
 

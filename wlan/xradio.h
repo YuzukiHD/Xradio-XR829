@@ -19,6 +19,8 @@
 #include <linux/atomic.h>
 #include <net/mac80211.h>
 #include <asm/bitops.h>
+#include <linux/version.h>
+
 
 /*Macroses for Driver parameters.*/
 #define XRWL_MAX_QUEUE_SZ    (128)
@@ -76,10 +78,12 @@
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0))
 #include <uapi/linux/time.h>
 #include <linux/timekeeping.h>
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 15, 0))
 #include <linux/timekeeping32.h>
+#endif
 
-void xr_do_gettimeofday(struct timeval *tv);
-void xr_get_monotonic_boottime(struct timespec *ts);
+void xr_do_gettimeofday(struct timespec64 *tv);
+void xr_get_monotonic_boottime(struct timespec64 *ts);
 
 #endif /* (LINUX_VERSION_CODE >= KERNEL_VERSION(5, 4, 0)) */
 
@@ -354,7 +358,7 @@ struct xradio_common {
 
 	int				buf_id_tx;	/* byte */
 	int				buf_id_rx;	/* byte */
-	int				wsm_rx_seq;	/* byte */
+	u8				wsm_rx_seq;	/* byte */
 	int				wsm_tx_seq;	/* byte */
 	int				hw_bufs_used;
 	int				hw_bufs_used_vif[XRWL_MAX_VIFS];
@@ -374,6 +378,7 @@ struct xradio_common {
 	bool                exit_sync;
 	int			hw_restart_work_running;
 	bool                hw_restart;
+	bool		    hw_cant_wakeup;
 	struct work_struct  hw_restart_work;
 #endif
 
@@ -436,7 +441,7 @@ struct xradio_common {
 
 	struct ieee80211_iface_limit		if_limits1[2];
 	struct ieee80211_iface_limit		if_limits2[2];
-	struct ieee80211_iface_limit		if_limits3[2];
+	struct ieee80211_iface_limit		if_limits3[3];
 	struct ieee80211_iface_combination	if_combs[3];
 
 	struct semaphore		wsm_oper_lock;
@@ -680,6 +685,7 @@ struct xradio_common *xrwl_vifpriv_to_hwpriv(struct xradio_vif *priv)
 {
 	return priv->hw_priv;
 }
+
 static inline
 struct xradio_vif *xrwl_get_vif_from_ieee80211(struct ieee80211_vif *vif)
 {

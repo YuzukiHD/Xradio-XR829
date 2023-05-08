@@ -20,7 +20,6 @@
 /* ******************************************************************** */
 /* mac80211 API */
 
-#ifdef CONFIG_PM
 #define XRADIO_WAKE_LOCK   "xradio_wlan"
 
 /* extern */   struct xradio_common;
@@ -71,7 +70,5 @@ void xradio_pm_unlock_awake(struct xradio_pm_state *pm);
 int xradio_wow_suspend(struct ieee80211_hw *hw,
 			       struct cfg80211_wowlan *wowlan);
 int xradio_wow_resume(struct ieee80211_hw *hw);
-
-#endif /* CONFIG_PM */
 
 #endif

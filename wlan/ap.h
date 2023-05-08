@@ -34,9 +34,7 @@ void xradio_bss_info_changed(struct ieee80211_hw *dev,
 			     struct ieee80211_bss_conf *info, u32 changed);
 int xradio_ampdu_action(struct ieee80211_hw *hw,
 			struct ieee80211_vif *vif,
-			enum ieee80211_ampdu_mlme_action action,
-			struct ieee80211_sta *sta, u16 tid, u16 *ssn,
-			u8 buf_size);
+			struct ieee80211_ampdu_params *params);
 
 void xradio_suspend_resume(struct xradio_vif *priv,
 			   struct wsm_suspend_resume *arg);

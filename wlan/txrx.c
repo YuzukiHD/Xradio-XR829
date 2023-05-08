@@ -1109,7 +1109,7 @@ xradio_tx_h_calc_link_ids(struct xradio_vif *priv,
 		t->txpriv.offchannel_if_id = 0;
 #endif
 
-	if (likely(t->tx_info->control.sta && t->sta_priv->link_id))
+	if (likely(t->sta_priv && t->sta_priv->link_id))
 		t->txpriv.raw_link_id =
 				t->txpriv.link_id =
 				t->sta_priv->link_id;
@@ -1148,7 +1148,7 @@ xradio_tx_h_calc_link_ids(struct xradio_vif *priv,
 		priv->link_id_db[t->txpriv.raw_link_id - 1].timestamp =
 				jiffies;
 
-#if defined(CONFIG_XRADIO_USE_EXTENSIONS)
+#if 0//defined(CONFIG_XRADIO_USE_EXTENSIONS)
 	if (t->tx_info->control.sta &&
 			(t->tx_info->control.sta->uapsd_queues & BIT(t->queue)))
 		t->txpriv.link_id = priv->link_id_uapsd;
@@ -1230,7 +1230,7 @@ xradio_tx_h_crypt(struct xradio_vif *priv,
 	} else if (skb_tailroom(t->skb) < icv_len) {
 		size_t offset = icv_len - skb_tailroom(t->skb);
 		u8 *p;
-		txrx_printk(XRADIO_DBG_ERROR,
+		txrx_printk(XRADIO_DBG_WARN,
 			"Slowpath: tailroom is not big enough. "
 			"Req: %zu, got: %d.\n",
 			icv_len, skb_tailroom(t->skb));
@@ -1247,11 +1247,12 @@ xradio_tx_h_crypt(struct xradio_vif *priv,
 	icv = skb_put(t->skb, icv_len);
 
 	if (t->tx_info->control.hw_key->cipher == WLAN_CIPHER_SUITE_AES_CMAC) {
-		struct ieee80211_mmie * mmie = (struct ieee80211_mmie *) icv;
+		struct ieee80211_mmie *mmie = (struct ieee80211_mmie *) icv;
 		memset(mmie, 0, sizeof(struct ieee80211_mmie));
 		mmie->element_id = WLAN_EID_MMIE;
 		mmie->length = sizeof(*mmie) - 2;
 	}
+
 	return 0;
 }
 #ifdef SUPPORT_HT40
@@ -1355,6 +1356,7 @@ xradio_tx_h_wsm(struct xradio_vif *priv, struct xradio_txinfo *t)
 }
 
 /* BT Coex specific handling */
+
 static void xradio_tx_h_bt(struct xradio_vif *priv, struct xradio_txinfo *t,
 						   struct wsm_tx *wsm)
 {
@@ -1579,10 +1581,10 @@ u16  rxparse_flags;
 #endif
 
 #if PERF_INFO_TEST
-struct timeval mac_start_time;
+struct timespec64 mac_start_time;
 #endif
 
-void xradio_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
+void xradio_tx(struct ieee80211_hw *dev, struct ieee80211_tx_control *control, struct sk_buff *skb)
 {
 	struct xradio_common *hw_priv = dev->priv;
 	struct xradio_txinfo t = {
@@ -1600,7 +1602,7 @@ void xradio_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 		.txpriv.iv_len = 0,
 #endif
 	};
-	struct ieee80211_sta *sta;
+	struct ieee80211_sta *sta = NULL;
 	struct wsm_tx *wsm;
 	bool tid_update = 0;
 #if PERF_INFO_TEST
@@ -1707,9 +1709,9 @@ void xradio_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 	t.txpriv.if_id = priv->if_id;
 	t.hdrlen = ieee80211_hdrlen(t.hdr->frame_control);
 	t.da = ieee80211_get_DA(t.hdr);
-	t.sta_priv =
-		(struct xradio_sta_priv *)&t.tx_info->control.sta->drv_priv;
-
+	if (control->sta != NULL) {
+		t.sta_priv = (struct xradio_sta_priv *)control->sta->drv_priv;
+	}
 	if (SYS_WARN(t.queue >= 4)) {
 		ret = __LINE__;
 		goto drop;
@@ -1740,9 +1742,9 @@ void xradio_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 	}
 
 	txrx_printk(XRADIO_DBG_MSG, "[TX] TX %d bytes (if_id: %d, "
-			"queue: %d, link_id: %d (%d)).\n",
+			"queue: %d, link_id: %d (%d)). priv %p\n",
 			skb->len, priv->if_id, t.queue, t.txpriv.link_id,
-			t.txpriv.raw_link_id);
+			t.txpriv.raw_link_id, priv);
 
 	xradio_tx_h_pm(priv, &t);
 	xradio_tx_h_calc_tid(priv, &t);
@@ -1805,7 +1807,7 @@ void xradio_tx(struct ieee80211_hw *dev, struct sk_buff *skb)
 	}
 
 	rcu_read_lock();
-	sta = rcu_dereference(t.tx_info->control.sta);
+	//sta = rcu_dereference(t.tx_info->control.sta);
 
 	xradio_tx_h_ba_stat(priv, &t);
 	spin_lock_bh(&priv->ps_state_lock);
@@ -1907,7 +1909,7 @@ extern int retry_mis;
 
 #ifdef SUPPORT_HT40
 
-void xradio_get_ieee80211_tx_rate(struct xradio_common *hw_priv,
+static void xradio_get_ieee80211_tx_rate(struct xradio_common *hw_priv,
 	u16 RateEntry, struct ieee80211_tx_rate *rates)
 {
 	if (GET_RATE_ENTRY_RATEINDEX(RateEntry) == FW_RATE_USE_DEFAULT) {
@@ -1953,9 +1955,7 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 	struct sk_buff *skb;
 	const struct xradio_txpriv *txpriv;
 	struct xradio_vif *priv;
-#ifndef SUPPORT_HT40
 	u32    feedback_retry = 0;
-#endif
 
 #ifdef SUPPORT_HT40
 
@@ -1985,7 +1985,7 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 		(arg->packetID == TES_P2P_0002_packet_id)) {
 		if (arg->status == 0x00) {
 
-			struct timeval TES_P2P_0002_tmval;
+			struct timespec64 TES_P2P_0002_tmval;
 			s32 TES_P2P_0002_roc_time;
 			s32 TES_P2P_0002_now_sec;
 			s32 TES_P2P_0002_now_usec;
@@ -1994,7 +1994,7 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 			xr_do_gettimeofday(&TES_P2P_0002_tmval);
 			TES_P2P_0002_roc_rst_need	= false;
 			TES_P2P_0002_now_sec = (s32)(TES_P2P_0002_tmval.tv_sec);
-			TES_P2P_0002_now_usec = (s32)(TES_P2P_0002_tmval.tv_usec);
+			TES_P2P_0002_now_usec = (s32)(TES_P2P_0002_tmval.tv_nsec / 1000);
 			TES_P2P_0002_roc_time = TES_P2P_0002_roc_dur -
 			    (((TES_P2P_0002_now_sec - TES_P2P_0002_roc_sec) * 1000) +
 			    ((TES_P2P_0002_now_usec - TES_P2P_0002_roc_usec) / 1000));
@@ -2047,13 +2047,13 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 	} else if ((hw_priv->start_stop_tsm.start) &&
 		(arg->status == WSM_STATUS_SUCCESS)) {
 		if (queue_id == hw_priv->tsm_info.ac) {
-			struct timeval tmval;
+			struct timespec64 tmval;
 			xr_do_gettimeofday(&tmval);
 			u16 pkt_delay =
 				hw_priv->start_stop_tsm.packetization_delay;
 			if (hw_priv->tsm_info.sta_roamed &&
 			    !hw_priv->tsm_info.use_rx_roaming) {
-				hw_priv->tsm_info.roam_delay = tmval.tv_usec -
+				hw_priv->tsm_info.roam_delay = tmval.tv_nsec / 1000 -
 				hw_priv->tsm_info.txconf_timestamp_vo;
 				if (hw_priv->tsm_info.roam_delay > pkt_delay)
 					hw_priv->tsm_info.roam_delay -= pkt_delay;
@@ -2062,7 +2062,7 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 				hw_priv->tsm_info.roam_delay);
 				hw_priv->tsm_info.sta_roamed = 0;
 			}
-			hw_priv->tsm_info.txconf_timestamp_vo = tmval.tv_usec;
+			hw_priv->tsm_info.txconf_timestamp_vo = tmval.tv_nsec / 1000;
 		}
 	}
 	spin_unlock_bh(&hw_priv->tsm_lock);
@@ -2321,7 +2321,7 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 			tx->status.rates[1].idx = -1;
 			tx->status.rates[2].idx = -1;
 			tx->status.rates[3].idx = -1;
-			tx->status.rates[4].idx = -1;
+			//tx->status.rates[4].idx = -1;
 		} else {
 			u8 RateTryIdx = 0x0;
 			u8 BreakIdx = 0x0;
@@ -2352,6 +2352,7 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 				}
 			}
 
+			/*
 			if ((!arg->status) && (!IsFind)) {
 				if (!IsBreak)
 					BreakIdx = 4;
@@ -2359,6 +2360,7 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 				xradio_get_ieee80211_tx_rate(hw_priv, arg->txedRateEntry, &tx->status.rates[BreakIdx]);
 				tx->status.rates[BreakIdx].count = 1;
 			}
+			*/
 		}
 
 #else
@@ -2367,11 +2369,11 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 			     arg->rate_try[2], arg->rate_try[1], arg->rate_try[0]);
 		if (txpriv->use_bg_rate) {   /* bg rates */
 			tx->status.rates[0].count = arg->ackFailures+1;
-		  tx->status.rates[0].idx   = 0;
-		  tx->status.rates[1].idx   = -1;
-		  tx->status.rates[2].idx   = -1;
-		  tx->status.rates[3].idx   = -1;
-		  tx->status.rates[4].idx   = -1;
+			tx->status.rates[0].idx   = 0;
+			tx->status.rates[1].idx   = -1;
+			tx->status.rates[2].idx   = -1;
+			tx->status.rates[3].idx   = -1;
+			//tx->status.rates[4].idx   = -1;
 		} else {
 			int i;
 			int j;
@@ -2388,7 +2390,7 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 						if (retries) {
 							feedback_retry += retries;
 							txed_idx = xradio_get_rate_idx(hw_priv, flag,
-										       ((i<<3) + j));
+										       (u16)((i<<3) + j));
 							txrx_printk(XRADIO_DBG_MSG,
 								    "rate_num=%d, hw=%d, idx=%d, "
 								    "retries=%d, flag=%d",
@@ -2396,7 +2398,7 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 								    txed_idx, retries, flag);
 							if (likely(txed_idx >= 0)) {
 								tx->status.rates[rate_num].idx   = txed_idx;
-								tx->status.rates[rate_num].count = retries;
+								tx->status.rates[rate_num].count = (u16)retries;
 								if (tx->status.rates[rate_num].flags &
 									IEEE80211_TX_RC_MCS)
 									tx->status.rates[rate_num].flags |=
@@ -2433,7 +2435,7 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 			}
 			/* get successful rate idx. */
 			if (!arg->status) {
-				txed_idx = xradio_get_rate_idx(hw_priv, flag, arg->txedRate);
+				txed_idx = xradio_get_rate_idx(hw_priv, flag, (u16)(arg->txedRate));
 				if (rate_num == 0) {
 					tx->status.rates[0].idx = txed_idx;
 					tx->status.rates[0].count = 1;
@@ -2458,7 +2460,6 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 #endif
 
 #ifdef CONFIG_XRADIO_DEBUGFS
-#ifndef SUPPORT_HT40
 		if (arg->status == WSM_STATUS_RETRY_EXCEEDED) {
 			tx_retrylimit++;
 			retry_mis += ((s32)hw_priv->short_frame_max_tx_count -
@@ -2479,15 +2480,14 @@ void xradio_tx_confirm_cb(struct xradio_common *hw_priv,
 				    arg->status, arg->ackFailures, feedback_retry);
 		}
 #endif
-#endif
 
 		txrx_printk(XRADIO_DBG_MSG, "[TX policy] Ack: " \
-		"%d:%d, %d:%d, %d:%d, %d:%d, %d:%d\n",
+		"%d:%d, %d:%d, %d:%d, %d:%d\n",
 		tx->status.rates[0].idx, tx->status.rates[0].count,
 		tx->status.rates[1].idx, tx->status.rates[1].count,
 		tx->status.rates[2].idx, tx->status.rates[2].count,
-		tx->status.rates[3].idx, tx->status.rates[3].count,
-		tx->status.rates[4].idx, tx->status.rates[4].count);
+		tx->status.rates[3].idx, tx->status.rates[3].count);
+		//tx->status.rates[4].idx, tx->status.rates[4].count);
 
 #ifdef CONFIG_XRADIO_TESTMODE
 		xradio_queue_remove(hw_priv, queue, arg->packetID);
@@ -2670,7 +2670,7 @@ u8 nettest_bssid[] = {0x00, 0x02, 0x03, 0x04, 0x05, 0x06};
 u8 save_rate_ie;
 #endif
 #if PERF_INFO_TEST
-struct timeval upper_rx_time;
+struct timespec64 upper_rx_time;
 size_t upper_rx_size;
 #endif
 
@@ -2716,17 +2716,17 @@ void xradio_rx_cb(struct xradio_vif *priv,
 	if (hw_priv->start_stop_tsm.start) {
 		unsigned queue_id = skb_get_queue_mapping(skb);
 		if (queue_id == 0) {
-			struct timeval tmval;
+			struct timespec64 tmval;
 			xr_do_gettimeofday(&tmval);
 			if (hw_priv->tsm_info.sta_roamed &&
 			    hw_priv->tsm_info.use_rx_roaming) {
-				hw_priv->tsm_info.roam_delay = tmval.tv_usec -
+				hw_priv->tsm_info.roam_delay = tmval.tv_nsec / 1000 -
 					hw_priv->tsm_info.rx_timestamp_vo;
 				txrx_printk(XRADIO_DBG_NIY, "[RX] RxInd Roaming:"
 				"roam_delay = %u\n", hw_priv->tsm_info.roam_delay);
 				hw_priv->tsm_info.sta_roamed = 0;
 			}
-			hw_priv->tsm_info.rx_timestamp_vo = tmval.tv_usec;
+			hw_priv->tsm_info.rx_timestamp_vo = tmval.tv_nsec / 1000;
 		}
 	}
 	spin_unlock_bh(&hw_priv->tsm_lock);
@@ -2869,20 +2869,18 @@ void xradio_rx_cb(struct xradio_vif *priv,
 	}
 
 	if (GET_RATE_ENTRY_MODEM(arg->rxedRateEntry) == FW_RATE_MODEM_HTOFDM) {
-		hdr->flag |= RX_FLAG_HT;
+		hdr->encoding = RX_ENC_HT;
 		hdr->rate_idx = GET_RATE_ENTRY_RATEINDEX(arg->rxedRateEntry);
 
-		if (GET_RATE_ENTRY_BANDWIDTH(arg->rxedRateEntry) == FW_RATE_BW_40M)
-			hdr->flag |= RX_FLAG_40MHZ;
 
 		if (GET_RATE_ENTRY_FLAGS(arg->rxedRateEntry)&FW_RATE_F_SGI)
-			hdr->flag |= RX_FLAG_SHORT_GI;
+			hdr->flag |= RX_ENC_FLAG_SHORT_GI;
 
 	} else {
 		hdr->rate_idx = LegacyRxedRateLut[hdr->band][GET_RATE_ENTRY_RATEINDEX(arg->rxedRateEntry)];
 
 		if (GET_RATE_ENTRY_FLAGS(arg->rxedRateEntry)&FW_RATE_F_SPRE)
-			hdr->flag |= RX_FLAG_SHORTPRE;
+			hdr->flag |= RX_ENC_FLAG_SHORTPRE;
 
 	}
 
@@ -2894,7 +2892,7 @@ void xradio_rx_cb(struct xradio_vif *priv,
 		SYS_WARN(1);
 
 	if (arg->rxedRate >= 14) {
-		hdr->flag |= RX_FLAG_HT;
+		hdr->encoding = RX_ENC_HT;
 		hdr->rate_idx = arg->rxedRate - 14;
 	} else if (arg->rxedRate >= 4) {
 		if (hdr->band == NL80211_BAND_5GHZ)
@@ -3045,6 +3043,7 @@ void xradio_rx_cb(struct xradio_vif *priv,
 	}
 #ifdef AP_HT_CAP_UPDATE
     if (priv->mode == NL80211_IFTYPE_AP           &&
+	priv->join_status == XRADIO_JOIN_STATUS_AP &&
 	ieee80211_is_beacon(frame->frame_control) &&
 	((priv->ht_info&HT_INFO_MASK) != 0x0011)  &&
 	!arg->status) {
@@ -3091,7 +3090,7 @@ void xradio_rx_cb(struct xradio_vif *priv,
 	if ((ieee80211_is_beacon(mgmt->frame_control) ||
 		ieee80211_is_probe_resp(mgmt->frame_control))
 		&& !arg->status) {
-		struct timespec ts;
+		struct timespec64 ts;
 		u64 tv_nsec;
 		xr_get_monotonic_boottime(&ts);
 		tv_nsec = ts.tv_nsec;
@@ -3102,6 +3101,8 @@ void xradio_rx_cb(struct xradio_vif *priv,
 		} else if (ieee80211_is_probe_resp(mgmt->frame_control)) {
 			mgmt->u.probe_resp.timestamp =
 				((u64)ts.tv_sec * 1000000 + tv_nsec);
+			if (hw_priv->scan.req)
+				hw_priv->scan.scan_probe_resp++;
 		}
 	}
 
@@ -3185,6 +3186,13 @@ void xradio_rx_cb(struct xradio_vif *priv,
 					"then station reconnects to ap, %d -> %d\n",
 					hw_priv->join_chan, ds_ie_partms_chan);
 				wsm_send_disassoc_to_self(hw_priv, priv);
+				if (priv->join_status != XRADIO_JOIN_STATUS_PASSIVE) {
+					cancel_work_sync(&priv->unjoin_work);
+					wsm_lock_tx(hw_priv);
+					xradio_unjoin_work(&priv->unjoin_work);
+					sta_printk(XRADIO_DBG_NIY,
+						"%s:do unjoin_work!\n", __func__);
+				}
 			}
 		}
 	}

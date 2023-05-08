@@ -154,7 +154,7 @@ static int xradio_sched_scan_start(struct xradio_vif *priv,
 
 int xradio_hw_scan(struct ieee80211_hw *hw,
 		   struct ieee80211_vif *vif,
-		   struct cfg80211_scan_request *req)
+		   struct ieee80211_scan_request *reqs)
 {
 	struct xradio_common *hw_priv = hw->priv;
 	struct xradio_vif *priv = xrwl_get_vif_from_ieee80211(vif);
@@ -167,6 +167,8 @@ int xradio_hw_scan(struct ieee80211_hw *hw,
 	u16 advance_scan_req_channel;
 #endif
 	int suspend_lock_state;
+	struct cfg80211_scan_request *req = (struct cfg80211_scan_request *)(&(reqs->req));
+
 	scan_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 
 	/* Scan when P2P_GO corrupt firmware MiniAP mode */
@@ -238,7 +240,7 @@ int xradio_hw_scan(struct ieee80211_hw *hw,
 		return -EBUSY;
 	}
 
-	frame.skb = mac80211_probereq_get(hw, vif, NULL, 0, req->ie, req->ie_len);
+	frame.skb = mac80211_probereq_data_get(hw, vif, NULL, 0, req->ie, req->ie_len);
 	if (!frame.skb) {
 		scan_printk(XRADIO_DBG_ERROR, "%s: mac80211_probereq_get failed!\n",
 			__func__);
@@ -350,6 +352,7 @@ int xradio_hw_scan(struct ieee80211_hw *hw,
 		hw_priv->scan.req     = req;
 		hw_priv->scan.n_ssids = 0;
 		hw_priv->scan.status  = 0;
+		hw_priv->scan.scan_probe_resp = 0;
 		hw_priv->scan.begin   = &req->channels[0];
 		hw_priv->scan.curr    = hw_priv->scan.begin;
 		hw_priv->scan.end     = &req->channels[req->n_channels];
@@ -436,7 +439,7 @@ int xradio_hw_sched_scan_start(struct ieee80211_hw *hw,
 		return -EINVAL;
 	}
 
-	frame.skb = mac80211_probereq_get(hw, priv->vif, NULL, 0,
+	frame.skb = mac80211_probereq_data_get(hw, priv->vif, NULL, 0,
 			ies->ie[0], ies->len[0]);
 	if (!frame.skb) {
 		scan_printk(XRADIO_DBG_ERROR, "%s: mac80211_probereq_get failed!\n",
@@ -675,13 +678,23 @@ void xradio_scan_work(struct work_struct *work)
 			xradio_set_pm(priv, &priv->powersave_mode);
 #endif
 
-		if (hw_priv->scan.status < 0)
-			scan_printk(XRADIO_DBG_ERROR, "Scan failed (%d).\n",
-				    hw_priv->scan.status);
-		else if (hw_priv->scan.req)
+		if (hw_priv->scan.status < 0) {
+			if (hw_priv->scan.scan_probe_resp) {
+				scan_printk(XRADIO_DBG_WARN, "scan aborted(resp=%d).\n",
+					hw_priv->scan.scan_probe_resp);
+				hw_priv->scan.status = 0;
+#ifdef SCAN_FAILED_WORKAROUND_OF_FW_EXCEPTION
+				hw_priv->scan.scan_failed_cnt = 0;
+#endif
+			} else {
+				scan_printk(XRADIO_DBG_ERROR, "Scan failed (%d).\n",
+					    hw_priv->scan.status);
+			}
+		} else if (hw_priv->scan.req) {
 			scan_printk(XRADIO_DBG_NIY, "Scan completed.\n");
-		else
+		} else {
 			scan_printk(XRADIO_DBG_NIY, "Scan canceled.\n");
+		}
 
 		hw_priv->scan.req = NULL;
 		xradio_scan_restart_delayed(priv);
@@ -704,7 +717,9 @@ void xradio_scan_work(struct work_struct *work)
 		if (hw_priv->scan.scan_failed_cnt >= 5) {
 			scan_printk(XRADIO_DBG_ERROR, "%s:Too many scan timeout=%d",
 					__func__, hw_priv->scan.scan_failed_cnt);
+#ifdef HW_ERROR_WIFI_RESET
 			hw_priv->bh_error = 1 ;
+#endif
 			hw_priv->scan.scan_failed_cnt = 0;
 		}
 #endif
@@ -1118,6 +1133,13 @@ void xradio_scan_timeout(struct work_struct *work)
 		container_of(work, struct xradio_common, scan.timeout.work);
 	scan_printk(XRADIO_DBG_TRC, "%s\n", __func__);
 
+#ifdef ROAM_OFFLOAD
+	if (hw_priv->auto_scanning == 0)
+		up(&hw_priv->wsm_oper_lock);
+#else
+	up(&hw_priv->wsm_oper_lock);
+#endif /*ROAM_OFFLOAD*/
+
 	if (likely(atomic_xchg(&hw_priv->scan.in_progress, 0))) {
 		down(&hw_priv->scan.status_lock);
 		if (hw_priv->scan.status > 0) {
@@ -1131,7 +1153,8 @@ void xradio_scan_timeout(struct work_struct *work)
 				    "complete notification.\n");
 #ifdef SCAN_FAILED_WORKAROUND_OF_FW_EXCEPTION
 			if (time_after(jiffies, (hw_priv->scan.scan_failed_timestamp +
-						SCAN_DEFAULT_TIMEOUT*HZ/1000))) {
+						SCAN_DEFAULT_TIMEOUT*HZ/1000))
+						&& !hw_priv->scan.scan_probe_resp) {
 				if (!hw_priv->BT_active)
 					hw_priv->scan.scan_failed_cnt += 1;
 				scan_printk(XRADIO_DBG_WARN, "%s:scan timeout cnt=%d",

@@ -514,7 +514,7 @@ int xradio_itp_get_tx(struct xradio_common *priv, u8 **data,
 {
 	struct xradio_itp *itp;
 	struct wsm_tx *tx;
-	struct timespec now;
+	struct timespec64 now;
 	int time_left_us;
 
 	if (!priv->debug)

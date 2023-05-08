@@ -530,6 +530,8 @@ struct xradio_common;
 /*get device temperature*/
 #define WSM_MIB_ID_GET_TEMPERATURE		0x1080
 
+#define WSM_MIB_ID_CE_TEST_CONFIG		0x1081
+
 /* 4.21 BlockAckPolicy */
 #define WSM_MIB_ID_BLOCK_ACK_POLICY		0x100E
 
