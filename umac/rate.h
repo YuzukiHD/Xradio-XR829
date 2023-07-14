@@ -93,7 +93,7 @@ void rate_control_deinitialize(struct ieee80211_local *local);
 
 
 /* Rate control algorithms */
-#ifdef CONFIG_MAC80211_RC_MINSTREL
+#ifdef CONFIG_MAC80211_RC_MINSTREL || CONFIG_XRMAC_RC_MINSTREL 
 int rc80211_minstrel_init(void);
 void rc80211_minstrel_exit(void);
 #else
